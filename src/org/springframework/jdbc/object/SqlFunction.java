@@ -1,5 +1,7 @@
 package org.springframework.jdbc.object;
 
+import org.springframework.jdbc.myannotation.Nullable;
+
 import javax.sql.DataSource;
 import java.sql.ResultSet;
 import java.sql.SQLException;

@@ -1,6 +1,8 @@
 package org.springframework.jdbc.object;
 
 
+import org.springframework.jdbc.myannotation.Nullable;
+
 import javax.swing.tree.RowMapper;
 import java.util.Map;
 
