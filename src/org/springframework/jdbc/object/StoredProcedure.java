@@ -1,5 +1,7 @@
 package org.springframework.jdbc.object;
 
+import org.springframework.jdbc.core.ParameterMapper;
+
 import javax.sql.DataSource;
 import java.util.HashMap;
 import java.util.Map;
@@ -26,7 +28,7 @@ public abstract class StoredProcedure extends SqlCall {
     }
 
     @Override
-    public void declareParameter(SqlParamter param) throws InvalidDataAccessApiUsageException {
+    public void declareParameter(SqlParameter param) throws InvalidDataAccessApiUsageException {
         if (param.getName() == null) {
             throw new InvalidDataAccessApiUsageException("Parameters to stored procedures must have names as well as types");
         }
@@ -37,9 +39,9 @@ public abstract class StoredProcedure extends SqlCall {
         Map<String, Object> paramsToUse = new HashMap<>();
         validateParameters(inParams);
         int i = 0;
-        for (SqlParamter sqlParamter : getDeclareParameters()) {
-            if (sqlParamter.isInputValueProvided() && i < inParams.length) {
-                paramsToUse.put(sqlParamter.getName(), inParams[i++]);
+        for (SqlParameter sqlParameter : getDeclareParameters()) {
+            if (sqlParameter.isInputValueProvided() && i < inParams.length) {
+                paramsToUse.put(sqlParameter.getName(), inParams[i++]);
             }
         }
         return getJdbcTemplate().call(newCallableStatementCreator(paramsToUse), getDeclareParameters());

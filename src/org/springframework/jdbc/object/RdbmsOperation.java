@@ -1,5 +1,8 @@
 package org.springframework.jdbc.object;
 
+import org.springframework.jdbc.core.SqlParameter;
+import org.springframework.jdbc.myannotation.Nullable;
+
 import javax.sql.DataSource;
 import java.sql.ResultSet;
 import java.sql.Types;
@@ -215,25 +218,6 @@ public abstract class RdbmsOperation implements InitializingBean {
 
     protected boolean allowsUnusedParameters() { return false; }
 
-
-    public @interface Nullable {
-    }
-
-
-    private void declareParameter(SqlParameter params) throws InvalidDataAccessApiUsageException {
-    }
-
-    private class InvalidDataAccessApiUsageException extends Exception {
-
-        public InvalidDataAccessApiUsageException(String message) {
-            super(message);
-        }
-    }
-
-    private class SqlParameter {
-        public SqlParameter(int num) {
-        }
-    }
 }
 
 
