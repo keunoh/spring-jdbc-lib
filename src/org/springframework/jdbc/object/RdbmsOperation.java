@@ -155,7 +155,6 @@ public abstract class RdbmsOperation implements InitializingBean {
         }
     }
 
-    public boolean isCompiled() { return this.compiled; }
 
     protected void checkCompiled() {
         if (!isCompiled()) {
