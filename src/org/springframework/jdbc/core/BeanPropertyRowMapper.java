@@ -1,5 +1,7 @@
 package org.springframework.jdbc.core;
 
+import org.springframework.jdbc.myannotation.ConversionService;
+import org.springframework.jdbc.myannotation.InvalidDataAccessApiUsageException;
 import org.springframework.jdbc.myannotation.Nullable;
 
 import java.beans.PropertyDescriptor;
