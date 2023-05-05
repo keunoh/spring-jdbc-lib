@@ -11,7 +11,7 @@ public class SqlOutParameter extends ResultSetSupportingSqlParameter {
         super(name, sqlType);
     }
 
-    public SqlOutParameter(String name, int sqlType, int scale, SqlReturnType sqlReturnType) {
+    public SqlOutParameter(String name, int sqlType, int scale) {
         super(name, sqlType, scale);
     }
 
