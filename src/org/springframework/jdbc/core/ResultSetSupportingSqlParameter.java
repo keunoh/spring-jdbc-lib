@@ -25,6 +25,11 @@ public class ResultSetSupportingSqlParameter extends SqlParameter {
         super(name, sqlType, typeName);
     }
 
+    public ResultSetSupportingSqlParameter(String name, int sqlType, ResultSetExtractor<?> rse) {
+        super(name, sqlType);
+        this.resultSetExtractor = rse;
+    }
+
     public ResultSetSupportingSqlParameter(String name, int sqlType, RowCallbackHandler rch) {
         super(name, sqlType);
         this.rowCallbackHandler = rch;
