@@ -1,15 +1,16 @@
 package org.springframework.jdbc.core;
 
 import org.springframework.jdbc.myannotation.DataAccessException;
+import org.springframework.jdbc.myannotation.InvalidDataAccessApiUsageException;
 import org.springframework.jdbc.myannotation.Nullable;
 
 import javax.sql.DataSource;
 import javax.xml.crypto.Data;
 import java.lang.reflect.Proxy;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 
 public class JdbcTemplate extends JdbcAccessor implements JdbcOperations {
 
@@ -240,4 +241,258 @@ public class JdbcTemplate extends JdbcAccessor implements JdbcOperations {
     public void query(String sql, RowCallbackHandler rch) throws DataAccessException {
         query(sql, new RowCallbackHandlerResultSetExtractor(rch));
     }
+
+    @Override
+    public <T> List<T> query(String sql, RowMapper<T> rowMapper) throws DataAccessException {
+        return result(query(sql, new RowMapperResultSetExtractor<>(rowMapper)));
+    }
+
+    @Override
+    public <T> Stream<T> queryForStream(String sql, RowMapper<T> rowMapper) throws DataAccessException {
+        class StreamStatementCallback implements StatementCallback<Stream<T>>, SqlProvider {
+            @Override
+            public Stream<T> doInStatement(Statement stmt) throws SQLException {
+                ResultSet rs = stmt.executeQuery(sql);
+                Connection con = stmt.getConnection();
+                return new ResultSetSpliterator<>(rs, rowMapper).stream().onClose(() -> {
+                    JdbcUtils.closeResultSet(rs);
+                    JdbcUtils.closeStatement(stmt);
+                    DataSourceUtils.releaseConnection(con, getDataSource());
+                });
+            }
+            @Override
+            public String getSql() {
+                return sql;
+            }
+        }
+
+        return result(execute(new StreamStatementCallback(), false));
+    }
+
+    @Override
+    public Map<String, Object> queryForMap(String sql) throws DataAccessException {
+        return result(queryForObject(sql, getColumnMapRowMapper()));
+    }
+
+    @Override
+    @Nullable
+    public <T> T queryForObject(String sql, RowMapper<T> rowMapper) throws DataAccessException {
+        List<T> results = query(sql, rowMapper);
+        return DataAccessUtils.nullableSingleResult(results);
+    }
+
+    @Override
+    @Nullable
+    public <T> T queryForObject(String sql, Class<T> requiredType) throws DataAccessException {
+        return queryForObject(sql, getSingleColumnRowMapper(requiredType));
+    }
+
+    @Override
+    public <T> List<T> queryForList(String sql, Class<T> elementType) throws DataAccessException {
+        return query(sql, getSingleColumnRowMapper(elementType));
+    }
+
+    @Override
+    public List<Map<String, Object>> queryForList(String sql) throws DataAccessException {
+        return query(sql, getColumnMapRowMapper());
+    }
+
+    @Override
+    public SqlRowSet queryForRowSet(String sql) throws DataAccessException {
+        return result(query(sql, new SqlRowSetResultSetExtractor()));
+    }
+
+    @Override
+    public int update(final String sql) throws DataAccessException {
+        Assert.notNull(sql, "SQL must not be null");
+        if (logger.isDebugEnabled()) {
+            logger.debug("Executing SQL update [" + sql + "]");
+        }
+
+        /**
+         * Callback to execute the update statement.
+         */
+        class UpdateStatementCallback implements StatementCallback<Integer>, SqlProvider {
+            @Override
+            public Integer doInStatement(Statement stmt) throws SQLException {
+                int rows = stmt.executeUpdate(sql);
+                if (logger.isTraceEnabled()) {
+                    logger.trace("SQL update affected " + rows + " rows");
+                }
+                return rows;
+            }
+            @Override
+            public String getSql() {
+                return sql;
+            }
+        }
+
+        return updateCount(execute(new UpdateStatementCallback(), true));
+    }
+
+    @Override
+    public int[] batchUpdate(final String... sql) throws DataAccessException {
+        Assert.notEmpty(sql, "SQL array must not be empty");
+        if (logger.isDebugEnabled()) {
+            logger.debug("Executing SQL batch update of " + sql.length + " statements");
+        }
+
+        /**
+         * Callback to execute the batch update.
+         */
+        class BatchUpdateStatementCallback implements StatementCallback<int[]>, SqlProvider {
+
+            @Nullable
+            private String currSql;
+
+            @Override
+            public int[] doInStatement(Statement stmt) throws SQLException, DataAccessException {
+                int[] rowsAffected = new int[sql.length];
+                if (JdbcUtils.supportsBatchUpdates(stmt.getConnection())) {
+                    for (String sqlStmt : sql) {
+                        this.currSql = appendSql(this.currSql, sqlStmt);
+                        stmt.addBatch(sqlStmt);
+                    }
+                    try {
+                        rowsAffected = stmt.executeBatch();
+                    }
+                    catch (BatchUpdateException ex) {
+                        String batchExceptionSql = null;
+                        for (int i = 0; i < ex.getUpdateCounts().length; i++) {
+                            if (ex.getUpdateCounts()[i] == Statement.EXECUTE_FAILED) {
+                                batchExceptionSql = appendSql(batchExceptionSql, sql[i]);
+                            }
+                        }
+                        if (StringUtils.hasLength(batchExceptionSql)) {
+                            this.currSql = batchExceptionSql;
+                        }
+                        throw ex;
+                    }
+                }
+                else {
+                    for (int i = 0; i < sql.length; i++) {
+                        this.currSql = sql[i];
+                        if (!stmt.execute(sql[i])) {
+                            rowsAffected[i] = stmt.getUpdateCount();
+                        }
+                        else {
+                            throw new InvalidDataAccessApiUsageException("Invalid batch SQL statement: " + sql[i]);
+                        }
+                    }
+                }
+                return rowsAffected;
+            }
+
+            private String appendSql(@Nullable String sql, String statement) {
+                return (StringUtils.hasLength(sql) ? sql + "; " + statement : statement);
+            }
+
+            @Override
+            @Nullable
+            public String getSql() {
+                return this.currSql;
+            }
+        }
+
+        int[] result = execute(new BatchUpdateStatementCallback(), true);
+        Assert.state(result != null, "No update counts");
+        return result;
+    }
+
+    //-------------------------------------------------------------------------
+    // Methods dealing with prepared statements
+    //-------------------------------------------------------------------------
+    @Nullable
+    private <T> T execute(PreparedStatementCreator psc, PreparedStatementCallback<T> action, boolean closeResources)
+            throws DataAccessException {
+
+        Assert.notNull(psc, "PreparedStatementCreator must not be null");
+        Assert.notNull(action, "Callback object must not be null");
+        if (logger.isDebugEnabled()) {
+            String sql = getSql(psc);
+            logger.debug("Executing prepared SQL statement" + (sql != null ? " [" + sql + "]" : ""));
+        }
+
+        Connection con = DataSourceUtils.getConnection(obtainDataSource());
+        PreparedStatement ps = null;
+        try {
+            ps = psc.createPreparedStatement(con);
+            applyStatementSettings(ps);
+            T result = action.doInPreparedStatement(ps);
+            handleWarnings(ps);
+            return result;
+        }
+        catch (SQLException ex) {
+            // Release Connection early, to avoid potential connection pool deadlock
+            // in the case when the exception translator hasn't been initialized yet.
+            if (psc instanceof ParameterDisposer) {
+                ((ParameterDisposer) psc).cleanupParameters();
+            }
+            String sql = getSql(psc);
+            psc = null;
+            JdbcUtils.closeStatement(ps);
+            ps = null;
+            DataSourceUtils.releaseConnection(con, getDataSource());
+            con = null;
+            throw translateException("PreparedStatementCallback", sql, ex);
+        }
+        finally {
+            if (closeResources) {
+                if (psc instanceof ParameterDisposer) {
+                    ((ParameterDisposer) psc).cleanupParameters();
+                }
+                JdbcUtils.closeStatement(ps);
+                DataSourceUtils.releaseConnection(con, getDataSource());
+            }
+        }
+    }
+
+    @Override
+    @Nullable
+    public <T> T execute(PreparedStatementCreator psc, PreparedStatementCallback<T> action)
+            throws DataAccessException {
+
+        return execute(psc, action, true);
+    }
+
+    @Override
+    @Nullable
+    public <T> T execute(String sql, PreparedStatementCallback<T> action) throws DataAccessException {
+        return execute(new SimplePreparedStatementCreator(sql), action, true);
+    }
+
+    @Nullable
+    public <T> T query(
+            PreparedStatementCreator psc, @Nullable final PreparedStatementSetter pss, final ResultSetExtractor<T> rse)
+            throws DataAccessException {
+
+        Assert.notNull(rse, "ResultSetExtractor must not be null");
+        logger.debug("Executing prepared SQL query");
+
+        return execute(psc, new PreparedStatementCallback<T>() {
+            @Override
+            @Nullable
+            public T doInPreparedStatement(PreparedStatement ps) throws SQLException {
+                ResultSet rs = null;
+                try {
+                    if (pss != null) {
+                        pss.setValues(ps);
+                    }
+                    rs = ps.executeQuery();
+                    return rse.extractData(rs);
+                }
+                finally {
+                    JdbcUtils.closeResultSet(rs);
+                    if (pss instanceof ParameterDisposer) {
+                        ((ParameterDisposer) pss).cleanupParameters();
+                    }
+                }
+            }
+        }, true);
+    }
+
+    @Override
+    @Nullable
+    public <T> T query(Pre)
+
 }
