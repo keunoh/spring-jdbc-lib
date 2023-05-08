@@ -497,4 +497,12 @@ public class JdbcTemplate extends JdbcAccessor implements JdbcOperations {
         return query(psc, null, rse);
     }
 
+    @Override
+    @Nullable
+    public <T> T query(String sql, @Nullable PreparedStatementSetter pss, ResultSetExtractor<T> rse) throws DataAccessException {
+        return query(new SimplePreparedStatementCreator(sql), pss, rse);
+    }
+
+
+
 }
