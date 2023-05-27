@@ -77,7 +77,7 @@ public class SubstituteLoggingEvent implements LoggingEvent {
         return argArray;
     }
 
-    public void setArgArray(Object[] argArray) {
+    public void setArgumentArray(Object[] argArray) {
         this.argArray = argArray;
     }
 
